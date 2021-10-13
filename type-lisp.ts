@@ -72,11 +72,13 @@ type GroupStrings<T, WorkingString extends string="", Result extends any[] = []>
      : T extends [infer Head, ...infer Rest] ? Head extends string ? GroupStrings<Rest, `${WorkingString}${Head}`, Result> : GroupStrings<Rest, "", [...Result, WorkingString, GroupStrings<Head>]> 
      : never;
 
-type SplitOnNewLines<T, Result extends string[]=[]>
-     = T extends `\n${infer B}` ? SplitOnNewLines<B, [...Result]>
-     : T extends `${infer A}\n${infer B}` ? SplitOnNewLines<B, [...Result, A]>
-     : T extends "" ? Result
-     : [...Result, T];
+type Replace<T, K extends string, V extends string, Acc extends string="">
+    = T extends `${K}${infer B}` ? Replace<B, K, V, `${Acc}${V}`>
+    : T extends `${infer A}${infer B}` ? Replace<B, K, V, `${Acc}${A}`>
+    : T extends "" ? Acc
+    : never;
+
+type t = Replace<"abcdeabcde", "c", "f">
 
 type SplitOnSpaces<T, Result extends string[]=[]>
      = T extends ` ${infer B}` ? SplitOnSpaces<B, [...Result]>
@@ -91,30 +93,50 @@ type SplitOnSpacesR<T, Result extends any[]=[]>
           : SplitOnSpacesR<Tail, [...Result, SplitOnSpacesR<H>]>
      : never;
 
-type Parse<T> = SplitOnSpacesR<GroupStrings<GroupParens<T>>>
+type Parse<T> = SplitOnSpacesR<GroupStrings<GroupParens<Replace<Replace<T, "\t", " ">, "\n", " ">>>>
 
 type Lambda<Arg, Body> = {arg: Arg, body: Body};
 type Func<Arg, Body, Env> = {lambda: Lambda<Arg, Body>, env: Env};
 
 type Eval<Expr, Env extends {[key: string]: any}={}>
-     = Expr extends ["+", infer A, infer B] ? Add<Eval<A, Env>, Eval<B, Env>>
+     = Expr extends [infer X] ? Eval<X, Env>
+     : Expr extends ["+", infer A, infer B] ? Add<Eval<A, Env>, Eval<B, Env>>
      : Expr extends ["*", infer A, infer B] ? Multiply<Eval<A, Env>, Eval<B, Env>>
      : Expr extends ["/", infer A, infer B] ? Divide<Eval<A, Env>, Eval<B, Env>>
      : Expr extends ["-", infer A, infer B] ? Subtract<Eval<A, Env>, Eval<B, Env>>
      : Expr extends ["if0", infer A, infer T, infer F] ? Eval<A, Env> extends 0 ? Eval<T, Env> : Eval<F, Env>
-     : Expr extends ["lambda", infer Arg, infer Body] ? Func<Arg, Body, Env>
-     : Expr extends ["let", infer A, infer B, infer C] ? A extends string ? Eval<C, Omit<Env, A> & {[k in A] : Eval<B, Env>}> : never
+     : Expr extends ["lambda", [infer Arg], infer Body] ? Func<Arg, Body, Env>
+     : Expr extends ["let", [infer A, infer B], infer C] ? A extends string ? Eval<C, Omit<Env, A> & {[k in A] : Eval<B, Env>}> : never
      : Expr extends string ? ParseInt<Expr> extends never ? Env[Expr] : ParseInt<Expr>
-     : Expr extends [infer F, infer Arg] ? Eval<F, Env> extends Func<infer ArgName, infer Body, infer Env> ?
-                ArgName extends string ? Eval<Body, Omit<Env, ArgName> & {[k in ArgName] : Eval<Arg, Env>}> : never : never
+     : Expr extends [infer F, infer Arg] ? Eval<F, Env> extends Func<infer ArgName, infer Body, infer FEnv> ?
+                ArgName extends string ? Eval<Body, Omit<FEnv, ArgName> & {[k in ArgName] : Eval<Arg, Env>}> : never : never
      : never;
 
-// type t = Eval<Parse<"(lambda x (if0 x 1 2)) 0">>;
+type program = `
+let
+(Y (lambda (X)
+      ((lambda (procedure)
+         (X (lambda (arg) ((procedure procedure) arg))))
+       (lambda (procedure)
+         (X (lambda (arg) ((procedure procedure) arg)))))))
 
-type g = Parse<`
-let Y 17
+(let
+(Fib* (lambda (func-arg) 
+    (lambda (n) (if0 (- n 2) n (+ (func-arg (- n 1)) (func-arg (- n 2)))))))
+(let
+(fib (Y Fib*))
 
-0
-`>;
+(let
+(F* (lambda (func-arg) (lambda (n) 
+    (if0 n 
+         1
+        (* n (func-arg (- n 1)))))))
+(let
+(fact (Y F*))
 
+(fact 3)))))
+`;
+
+
+type g = Parse<program>;
 type q = Eval<g>;
