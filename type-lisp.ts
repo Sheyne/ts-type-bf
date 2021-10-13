@@ -8,11 +8,14 @@ type Length<T> =
     T extends { length: infer L } ? L : never;
 
 type Add<A, B> = 
-    Length<[...MakeTupleNumber<A>, ...MakeTupleNumber<B>]>;
+    MakeTupleNumber<A> extends any[] ?
+    MakeTupleNumber<B> extends any[] ?
+    Length<[...MakeTupleNumber<A>, ...MakeTupleNumber<B>]> : never : never;
 type Subtract<A, B> = 
-    BuildTuple<A> extends [...(infer U), ...MakeTupleNumber<B>]
+    MakeTupleNumber<B> extends any[]?
+    MakeTupleNumber<A> extends [...(infer U), ...MakeTupleNumber<B>]
         ? Length<U>
-        : never;
+        : never : never;
 
 type MultiAdd<
     N, A, I
@@ -98,18 +101,43 @@ type Parse<T> = SplitOnSpacesR<GroupStrings<GroupParens<Replace<Replace<T, "\t",
 type Lambda<Arg, Body> = {arg: Arg, body: Body};
 type Func<Arg, Body, Env> = {lambda: Lambda<Arg, Body>, env: Env};
 
-type Eval<Expr, Env extends {[key: string]: any}={}>
-     = Expr extends [infer X] ? Eval<X, Env>
-     : Expr extends ["+", infer A, infer B] ? Add<Eval<A, Env>, Eval<B, Env>>
-     : Expr extends ["*", infer A, infer B] ? Multiply<Eval<A, Env>, Eval<B, Env>>
-     : Expr extends ["/", infer A, infer B] ? Divide<Eval<A, Env>, Eval<B, Env>>
-     : Expr extends ["-", infer A, infer B] ? Subtract<Eval<A, Env>, Eval<B, Env>>
-     : Expr extends ["if0", infer A, infer T, infer F] ? Eval<A, Env> extends 0 ? Eval<T, Env> : Eval<F, Env>
-     : Expr extends ["lambda", [infer Arg], infer Body] ? Func<Arg, Body, Env>
-     : Expr extends ["let", [infer A, infer B], infer C] ? A extends string ? Eval<C, Omit<Env, A> & {[k in A] : Eval<B, Env>}> : never
-     : Expr extends string ? ParseInt<Expr> extends never ? Env[Expr] : ParseInt<Expr>
-     : Expr extends [infer F, infer Arg] ? Eval<F, Env> extends Func<infer ArgName, infer Body, infer FEnv> ?
-                ArgName extends string ? Eval<Body, Omit<FEnv, ArgName> & {[k in ArgName] : Eval<Arg, Env>}> : never : never
+type UpdateStore<Store extends any[], Location extends any[], Value, Accum extends any[]=[]>
+    = Location extends [] ? Store extends [any, ...infer Rest] ? [...Accum, Value, ...Rest] : never
+    : Location extends [any, ...infer NewLoc] ? Store extends [infer Head, ...infer Rest] ? UpdateStore<Rest, NewLoc, Value, [...Accum, Head]>
+    : never : never;
+
+type hjdsaj = UpdateStore<[1, 2, 3, 4, 5], [any, any, any, any], 5>;
+
+type Eval<Expr, Env extends {[key: string]: any}, Store>
+     = Expr extends ["make-box"] ? Store extends [...infer StoreContent] ? {value: {reference: Length<Store>}, store: [...StoreContent, undefined]} : never
+     : Expr extends ["get", infer A] ? Eval<A, Env, Store> extends {value: infer Ar, store: infer Store1} ? Store1 extends [...any] ? Ar extends {reference: number} ? {value: Store1[Ar['reference']], store: Store1} : {"error": "not a box"} : never : never
+     : Expr extends ["set", infer A, infer B] ? 
+        (Eval<A, Env, Store> extends {value: infer Ar, store: infer Store1} ? 
+        Eval<B, Env, Store1> extends {value: infer Br, store: infer Store2} ?
+        Store2 extends [...any] ? 
+        Ar extends {reference: infer Ref} ? MakeTupleNumber<Ref> extends any[] ? {value: MakeTupleNumber<Ref>, store: UpdateStore<Store2, MakeTupleNumber<Ref>, Br>} : {"error": "not a box"} : never : never : never : never)
+     : Expr extends [infer X] ? Eval<X, Env, Store>
+     : Expr extends ["+", infer A, infer B] ? 
+            Eval<A, Env, Store> extends {value: infer Ar, store: infer Store1} ? Eval<B, Env, Store1> extends {value: infer Br, store: infer Store2} ? {value: Add<Ar, Br>, store: Store2} : never : never
+     : Expr extends ["*", infer A, infer B] ?
+            Eval<A, Env, Store> extends {value: infer Ar, store: infer Store1} ? Eval<B, Env, Store1> extends {value: infer Br, store: infer Store2} ? {value: Multiply<Ar, Br>, store: Store2} : never : never
+     : Expr extends ["/", infer A, infer B] ?
+            Eval<A, Env, Store> extends {value: infer Ar, store: infer Store1} ? Eval<B, Env, Store1> extends {value: infer Br, store: infer Store2} ? {value: Divide<Ar, Br>, store: Store2} : never : never
+     : Expr extends ["-", infer A, infer B] ?
+            Eval<A, Env, Store> extends {value: infer Ar, store: infer Store1} ? Eval<B, Env, Store1> extends {value: infer Br, store: infer Store2} ? {value: Subtract<Ar, Br>, store: Store2} : never : never
+     : Expr extends ["if0", infer A, infer T, infer F] ?
+        Eval<A, Env, Store> extends {value: infer V, store: infer Store1} ? (V extends 0 ? Eval<T, Env, Store1> : Eval<F, Env, Store1>) : never
+     : Expr extends ["lambda", [infer Arg], infer Body] ? {value: Func<Arg, Body, Env>, store: Store}
+     : Expr extends ["let", [infer A, infer B], infer C] ? 
+        A extends string ?
+        Eval<B, Env, Store> extends {value: infer V, store: infer Store1} ?
+        Eval<C, Omit<Env, A> & {[k in A] : V}, Store1> : never : never
+     : Expr extends string ? {value: (ParseInt<Expr> extends never ? Env[Expr] : ParseInt<Expr>), store: Store}
+     : Expr extends [infer F, infer Arg] ? 
+        Eval<F, Env, Store> extends {value: Func<infer ArgName, infer Body, infer FEnv>, store: infer Store1} ?
+        ArgName extends string ? 
+        Eval<Arg, Env, Store1> extends {value: infer ArgVal, store: infer Store2} ?
+        Eval<Body, Omit<FEnv, ArgName> & {[k in ArgName] : ArgVal}, Store2> : never : never : never
      : never;
 
 type MacroExpand<Expr, Accum extends any[]=[]>
@@ -118,27 +146,40 @@ type MacroExpand<Expr, Accum extends any[]=[]>
     : Expr extends [infer A, ...infer Rest] ? MacroExpand<Rest, [...Accum, MacroExpand<A>]>
     : Expr;
 
-type program = `
-let
-(Y (lambda (X)
-      ((lambda (procedure)
-         (X (lambda (arg) ((procedure procedure) arg))))
-       (lambda (procedure)
-         (X (lambda (arg) ((procedure procedure) arg)))))))
+// type program = `
+// let
+// (Y (lambda (X)
+//       ((lambda (procedure)
+//          (X (lambda (arg) ((procedure procedure) arg))))
+//        (lambda (procedure)
+//          (X (lambda (arg) ((procedure procedure) arg)))))))
 
-(Fib* (lambda (func-arg) 
-    (lambda (n) (if0 (- n 2) n (+ (func-arg (- n 1)) (func-arg (- n 2)))))))
-(fib (Y Fib*))
+// (Fib* (lambda (func-arg) 
+//     (lambda (n) (if0 (- n 2) n (+ (func-arg (- n 1)) (func-arg (- n 2)))))))
+// (fib (Y Fib*))
 
-(F* (lambda (func-arg) (lambda (n) 
+// (F* (lambda (func-arg) (lambda (n) 
+//     (if0 n 
+//          1
+//         (* n (func-arg (- n 1)))))))
+// (fact (Y F*))
+
+// (fact 3)
+// `;
+
+type h = MacroExpand<Parse<`
+let 
+    (fact-box (make-box))
+    (fib-box (make-box))
+    (fib (lambda (n) 
+        (if0 n 0 (if0 (- n 1) n (+ ((get fib-box) (- n 1)) ((get fib-box) (- n 2)))))))
+    (u (set fib-box fib))
+    (fact (lambda (n)
     (if0 n 
-         1
-        (* n (func-arg (- n 1)))))))
-(fact (Y F*))
+        1
+    (* n ((get fact-box) (- n 1))))))
+    (u (set fact-box fact))
 
-(fact 3)
-`;
-
-type h = MacroExpand<Parse<program>>;
-
-type q = Eval<h>;
+(fact 4)
+`>>;
+type q = Eval<h, {}, []>;
