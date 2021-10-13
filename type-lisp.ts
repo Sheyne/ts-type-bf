@@ -112,6 +112,12 @@ type Eval<Expr, Env extends {[key: string]: any}={}>
                 ArgName extends string ? Eval<Body, Omit<FEnv, ArgName> & {[k in ArgName] : Eval<Arg, Env>}> : never : never
      : never;
 
+type MacroExpand<Expr, Accum extends any[]=[]>
+    = Expr extends [] ? Accum
+    : Expr extends ["let", [infer K, infer V], infer Rest1, infer Rest2, ...infer Rest] ? ["let", [K, MacroExpand<V>], MacroExpand<["let", Rest1, Rest2, ...Rest]>]
+    : Expr extends [infer A, ...infer Rest] ? MacroExpand<Rest, [...Accum, MacroExpand<A>]>
+    : Expr;
+
 type program = `
 let
 (Y (lambda (X)
@@ -120,23 +126,19 @@ let
        (lambda (procedure)
          (X (lambda (arg) ((procedure procedure) arg)))))))
 
-(let
 (Fib* (lambda (func-arg) 
     (lambda (n) (if0 (- n 2) n (+ (func-arg (- n 1)) (func-arg (- n 2)))))))
-(let
 (fib (Y Fib*))
 
-(let
 (F* (lambda (func-arg) (lambda (n) 
     (if0 n 
          1
         (* n (func-arg (- n 1)))))))
-(let
 (fact (Y F*))
 
-(fact 3)))))
+(fact 3)
 `;
 
+type h = MacroExpand<Parse<program>>;
 
-type g = Parse<program>;
-type q = Eval<g>;
+type q = Eval<h>;
